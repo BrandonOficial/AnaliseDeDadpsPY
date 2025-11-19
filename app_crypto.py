@@ -1,155 +1,76 @@
 import streamlit as st
 import requests
 import pandas as pd
-import plotly.graph_objects as go
-from datetime import datetime
+import plotly.express as px
 
-# --- Configuração da Página ---
-st.set_page_config(layout="wide", page_title="Crypto Trader Pro", page_icon="📊")
+# --- Configuração Básica ---
+st.set_page_config(layout="centered", page_title="Crypto Simples")
 
-# --- Funções de Dados ---
-@st.cache_data(ttl=300)
-def get_ohlc_data(coin_id: str, days: str) -> pd.DataFrame:
-    """
-    Busca dados OHLC (Open, High, Low, Close) na CoinGecko.
-    """
+# --- Função Única de Pegar Dados (O Coração do App) ---
+@st.cache_data(ttl=300) # Cache de 5 min
+def pegar_dados_simples(moeda_id, dias):
     try:
-        # Endpoint específico para velas (OHLC)
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
-        params = {'vs_currency': 'usd', 'days': days}
+        # Usando a API simples de histórico
+        url = f"https://api.coingecko.com/api/v3/coins/{moeda_id}/market_chart"
+        params = {'vs_currency': 'usd', 'days': dias, 'interval': 'daily'}
         
-        response = requests.get(url, params=params)
-        response.raise_for_status()
+        resposta = requests.get(url, params=params)
+        dados = resposta.json()
         
-        data = response.json()
-        if not data: return pd.DataFrame()
-        
-        # Formato CoinGecko OHLC: [time, open, high, low, close]
-        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
-        df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
+        # Transforma a lista de preços em Tabela (DataFrame)
+        df = pd.DataFrame(dados['prices'], columns=['timestamp', 'preco'])
+        df['data'] = pd.to_datetime(df['timestamp'], unit='ms')
         
         return df
-    except Exception as e:
-        st.error(f"Erro na API: {e}")
+    except:
         return pd.DataFrame()
 
-def calculate_rsi(df: pd.DataFrame, period=14):
-    """
-    Calcula o RSI (Relative Strength Index) manualmente com Pandas.
-    """
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    return df
-
-# --- Funções de Visualização ---
-def plot_candlestick(df: pd.DataFrame, coin_name: str):
-    """
-    Cria o gráfico de velas (Candlestick) profissional.
-    """
-    fig = go.Figure()
-
-    # Adiciona as Velas
-    fig.add_trace(go.Candlestick(
-        x=df['date'],
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        name='Preço'
-    ))
-
-    fig.update_layout(
-        title=f"Análise Técnica: {coin_name}",
-        yaxis_title='Preço (USD)',
-        xaxis_rangeslider_visible=False, # Remove o slider inferior para limpar
-        template="plotly_dark",
-        height=500
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_rsi(df: pd.DataFrame):
-    """
-    Plota o indicador RSI separado.
-    """
-    fig = go.Figure()
-    
-    # Linha do RSI
-    fig.add_trace(go.Scatter(x=df['date'], y=df['RSI'], name='RSI', line=dict(color='orange')))
-    
-    # Linhas de referência (70 = Sobrecomprado, 30 = Sobrevendido)
-    fig.add_hrect(y0=70, y1=100, line_width=0, fillcolor="red", opacity=0.2)
-    fig.add_hrect(y0=0, y1=30, line_width=0, fillcolor="green", opacity=0.2)
-    
-    fig.update_layout(
-        title="Indicador RSI (14 dias)",
-        yaxis_title="Força (0-100)",
-        yaxis_range=[0, 100],
-        template="plotly_dark",
-        height=300
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- Main ---
+# --- Interface do Usuário ---
 def main():
-    st.title("📊 Crypto Trader Pro")
+    st.title("🎯 Monitor de Cripto Simplificado")
     
-    # Sidebar
-    st.sidebar.header("Setup")
-    coins = {"Bitcoin": "bitcoin", "Ethereum": "ethereum", "Solana": "solana", "Ripple": "ripple"}
-    selected_coin = st.sidebar.selectbox("Ativo", list(coins.keys()))
+    # 1. Barra Lateral Simples
+    st.sidebar.header("Escolha sua Moeda")
+    opcoes = {"Bitcoin": "bitcoin", "Ethereum": "ethereum", "Solana": "solana"}
+    nome_moeda = st.sidebar.selectbox("Moeda", list(opcoes.keys()))
+    dias = st.sidebar.radio("Período", ["7", "30", "90", "365"], index=1, horizontal=True)
     
-    # CoinGecko OHLC aceita dias específicos: 1, 7, 14, 30, 90, 180, 365
-    days = st.sidebar.select_slider("Janela de Tempo (Dias)", options=["7", "14", "30", "90", "180", "365"], value="30")
+    id_moeda = opcoes[nome_moeda]
     
-    coin_id = coins[selected_coin]
-
-    # Processamento
-    with st.spinner("Calculando indicadores..."):
-        df = get_ohlc_data(coin_id, days)
+    # 2. Buscando os dados
+    df = pegar_dados_simples(id_moeda, dias)
+    
+    if not df.empty:
+        # Pegando valores para mostrar nos cartões
+        preco_atual = df['preco'].iloc[-1]  # Último preço da lista
+        preco_inicio = df['preco'].iloc[0]  # Primeiro preço da lista
+        variacao = ((preco_atual - preco_inicio) / preco_inicio) * 100
         
-        if not df.empty:
-            # Calcular Indicadores Técnicos
-            df = calculate_rsi(df)
-            
-            # Área Principal
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.subheader(f"Análise de {selected_coin}")
-            with col2:
-                # Botão de Download (Feature Nova!)
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Baixar Dados (CSV)",
-                    data=csv,
-                    file_name=f"{coin_id}_history.csv",
-                    mime='text/csv',
-                )
+        # 3. Cartões de Informação (Métricas)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Preço Atual", f"$ {preco_atual:,.2f}")
+        col2.metric("Variação no Período", f"{variacao:.2f}%", delta_color="normal") # Verde/Vermelho auto
+        col3.metric("Máxima Atingida", f"$ {df['preco'].max():,.2f}")
+        
+        st.divider()
 
-            # 1. Gráfico Principal (Candles)
-            plot_candlestick(df, selected_coin)
-            
-            # 2. Gráfico Secundário (RSI)
-            plot_rsi(df)
-
-            # 3. Explicação do RSI para o usuário
-            with st.expander("ℹ️ O que é o gráfico laranja (RSI)?"):
-                st.markdown("""
-                **RSI (Índice de Força Relativa):**
-                * **Acima de 70 (Área Vermelha):** A moeda pode estar **cara demais** (Sobrecomprada). Chance de cair.
-                * **Abaixo de 30 (Área Verde):** A moeda pode estar **barata demais** (Sobrevendida). Chance de subir.
-                """)
-            
-            st.divider()
-            st.subheader("Dados Detalhados")
-            st.dataframe(df.sort_values('date', ascending=False), use_container_width=True)
-            
-        else:
-            st.warning("Não foi possível carregar os dados OHLC.")
+        # 4. Gráfico de Área (Mais limpo que velas)
+        fig = px.area(
+            df, 
+            x='data', 
+            y='preco',
+            title=f"Evolução do {nome_moeda}",
+            labels={'data': 'Data', 'preco': 'Preço (USD)'}
+        )
+        
+        # Ajustes visuais para ficar bonitão
+        fig.update_traces(line_color='#8257E5') # Roxo bonito
+        fig.update_layout(yaxis_tickprefix="$") # Coloca o $ no eixo Y
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    else:
+        st.error("Erro ao carregar dados. A API pode estar ocupada.")
 
 if __name__ == "__main__":
     main()
